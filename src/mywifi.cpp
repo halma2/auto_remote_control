@@ -20,9 +20,7 @@ void WIFiConfig::startWiFiOrAP() {
     if (!settings.connectedOnce) Serial.println("❌... mert még eddig nem csatlakozott arra a hálózatra.");
     startAccessPoint();
   } 
-  else {
-    startMDNS();
-  }
+  startMDNS();
 }
 
 void WIFiConfig::resetButtonHandle(int pressDuration) {
@@ -99,6 +97,7 @@ bool WIFiConfig::connectToWiFi() {
       Serial.println("✅ Csatlakozva: " + WiFi.localIP().toString());
       ledSetColor(false, true, false);
       if (!settings.connectedOnce) {
+        settings.connectedOnce = true;
         saveWiFiSettings(true);
       }
       apMode = false;
@@ -114,18 +113,20 @@ bool WIFiConfig::connectToWiFi() {
 }
 
 void WIFiConfig::reconnectIfNeeded() {
-  if (apMode && settings.connectedOnce) {
+  if (!resetwifi && settings.connectedOnce) {
     if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt > reconnectInterval) {
       Serial.println("🔁 Újrapróbálkozás Wi-Fi csatlakozásra...");
+      lost_connection = true;
       WiFi.begin(settings.ssid.c_str(), settings.password.c_str());
       lastReconnectAttempt = millis();
     }
-    if (WiFi.status() == WL_CONNECTED) {
+    if (lost_connection && WiFi.status() == WL_CONNECTED) {
       Serial.println("✅ Csatlakozva: " + WiFi.localIP().toString());
       ledSetColor(false, true, false);
-      if (settings.connectedOnce) {
+      if (!settings.connectedOnce) {
         saveWiFiSettings(true);
       }
+      lost_connection = false;
       apMode = false;
     }
   }
@@ -145,7 +146,7 @@ void WIFiConfig::startMDNS() {
   else Serial.println("❌ mDNS hiba");
 }
 
-void WIFiConfig::setupWebServer() { //TODO && (||)---------------------------------------------------------
+void WIFiConfig::setupWebServer() {
   server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
     if (!this->apMode && this->settings.connectedOnce && !this->resetwifi) {
       Serial.println("🌐 Wi-Fi beállítva, kiszolgáló indítása...");
