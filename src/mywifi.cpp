@@ -14,7 +14,7 @@ bool isWiFiSet() {
 }
 
 void WIFiConfig::startWiFiOrAP() {
-  settings = loadWiFiSettings();
+  loadWiFiSettings();
   if (!connectToWiFi() && !settings.connectedOnce) {
     Serial.println("❌ Nem sikerült csatlakozni a Wi-Fi-hez, indítás AP módban...");
     if (!settings.connectedOnce) Serial.println("❌... mert még eddig nem csatlakozott arra a hálózatra.");
@@ -35,18 +35,18 @@ void WIFiConfig::resetButtonHandle(int pressDuration) {
     }
 }
 
-WifiSettings WIFiConfig::loadWiFiSettings() {
+void WIFiConfig::loadWiFiSettings() {
   WifiSettings settings = {"", "", false};
 
   if (!LittleFS.begin()) {
     Serial.println("❌ LittleFS inicializálása sikertelen.");
-    return settings;
+    return;
   }
 
   File file = LittleFS.open("/wifi.json", "r");
   if (!file) {
     Serial.println("❌ Nem található a wifi.json fájl.");
-    return settings;
+    return;
   }
 
   JsonDocument doc;
@@ -54,7 +54,7 @@ WifiSettings WIFiConfig::loadWiFiSettings() {
   if (error) {
     Serial.println("❌ Hiba a JSON beolvasása közben:");
     Serial.println(error.c_str());
-    return settings;
+    return;
   }
 
   settings.ssid = doc["ssid"].as<String>();
@@ -64,7 +64,6 @@ WifiSettings WIFiConfig::loadWiFiSettings() {
   Serial.println("SSID: " + settings.ssid);
   // Ne írd ki a jelszót biztonsági okból
   file.close();
-  return settings;
 }
 
 // Wi-Fi adatok mentése wifi.json-be
