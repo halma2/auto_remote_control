@@ -1,4 +1,4 @@
-# automata_vezerles
+# automata_vezerles - auto remote control
 This project is about how an ESP32-webserver (written in Arduino) can be set up without writing the ssid and the password of the router.
 (Actually this script was created for hungarian developers so all the tests (Serial.print, html, http requests) and the comments were written by hungarian).
 
