@@ -2,21 +2,43 @@
 #include "mywifi.h"
 #include <ESPmDNS.h>
 #include "led.h"
-#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <ESPAsyncWebServer.h>
 
 unsigned long lastReconnectAttempt = 0;
-const char* dnsName = "vilagitas";
-const char* configSsid = "vilagitas-setup";
-extern const unsigned long reconnectInterval = 3000; // 30 másodperc
-bool apModeTriggered = false;
-/*const byte DNS_PORT = 53;
-const char* captivePortalHostname = "setup.local"; // bármi lehet
-DNSServer dnsServer;*/
+AsyncWebServer server(80);
 
-WiFiSettings loadWiFiSettings() {
-  WiFiSettings settings;
+bool isWiFiSet() {
+  return LittleFS.exists("/wifi.json");
+}
+
+void WIFiConfig::startWiFiOrAP() {
+  settings = loadWiFiSettings();
+  if (!connectToWiFi() && !settings.connectedOnce) {
+    Serial.println("❌ Nem sikerült csatlakozni a Wi-Fi-hez, indítás AP módban...");
+    if (!settings.connectedOnce) Serial.println("❌... mert még eddig nem csatlakozott arra a hálózatra.");
+    startAccessPoint();
+  } 
+  else {
+    startMDNS();
+  }
+}
+
+void WIFiConfig::resetButtonHandle(int pressDuration) {
+  if (pressDuration > 3000 && !apMode) { // 3 másodperc
+      Serial.println("🆘 Gomb hosszú lenyomás – AP mód aktiválása!");
+      
+      WiFi.disconnect(true);
+      delay(500);
+      apMode = true;
+      resetwifi = true;
+      startAccessPoint();
+    }
+}
+
+WifiSettings WIFiConfig::loadWiFiSettings() {
+  WifiSettings settings = {"", "", false};
 
   if (!LittleFS.begin()) {
     Serial.println("❌ LittleFS inicializálása sikertelen.");
@@ -48,11 +70,11 @@ WiFiSettings loadWiFiSettings() {
 }
 
 // Wi-Fi adatok mentése wifi.json-be
-void saveWiFiSettings(const WiFiSettings& settings) {
+void WIFiConfig::saveWiFiSettings(bool connectedOnce) {
   JsonDocument doc;
   doc["ssid"] = settings.ssid;
   doc["password"] = settings.password;
-  doc["connectedOnce"] = settings.connectedOnce;
+  doc["connectedOnce"] = connectedOnce;
 
   File file = LittleFS.open("/wifi.json", "w");
   if (file) {
@@ -61,22 +83,7 @@ void saveWiFiSettings(const WiFiSettings& settings) {
   }
 }
 
-void markConnectedOnce(WiFiSettings& settings) {
-  JsonDocument doc;
-  doc["ssid"] = settings.ssid;
-  doc["password"] = settings.password;
-  doc["connectedOnce"] = true;
-
-  File file = LittleFS.open("/wifi.json", "w");
-  if (file) {
-    serializeJsonPretty(doc, file);
-    file.close();
-    Serial.println("✅ Mentve: connectedOnce = true");
-    Serial.println("✅ Wi-Fi kapcsolat mentve (connectedOnce = true)");
-  }
-}
-
-bool connectToWiFi(WiFiSettings& settings) {
+bool WIFiConfig::connectToWiFi() {
   if (settings.ssid == "" || settings.password == "") {
     Serial.println("❌ Hiányzó Wi-Fi adatok.");
     return false;
@@ -92,8 +99,9 @@ bool connectToWiFi(WiFiSettings& settings) {
       Serial.println("✅ Csatlakozva: " + WiFi.localIP().toString());
       ledSetColor(false, true, false);
       if (!settings.connectedOnce) {
-        markConnectedOnce(settings);
+        saveWiFiSettings(true);
       }
+      apMode = false;
       return true;
     }
     delay(500);
@@ -105,28 +113,69 @@ bool connectToWiFi(WiFiSettings& settings) {
   return false;
 }
 
-void reconnectIfNeeded(WiFiSettings& wifiSettings) {
-  if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt > reconnectInterval) {
-    Serial.println("🔁 Újrapróbálkozás Wi-Fi csatlakozásra...");
-    WiFi.begin(wifiSettings.ssid.c_str(), wifiSettings.password.c_str());
-    lastReconnectAttempt = millis();
+void WIFiConfig::reconnectIfNeeded() {
+  if (apMode && settings.connectedOnce) {
+    if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt > reconnectInterval) {
+      Serial.println("🔁 Újrapróbálkozás Wi-Fi csatlakozásra...");
+      WiFi.begin(settings.ssid.c_str(), settings.password.c_str());
+      lastReconnectAttempt = millis();
+    }
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("✅ Csatlakozva: " + WiFi.localIP().toString());
+      ledSetColor(false, true, false);
+      if (settings.connectedOnce) {
+        saveWiFiSettings(true);
+      }
+      apMode = false;
+    }
   }
 }
 
-
-void startAccessPoint() {
+void WIFiConfig::startAccessPoint() {
   Serial.println("AP mód aktiválása: vilagitas-setup");
   WiFi.mode(WIFI_AP);
   WiFi.softAP(configSsid);
   Serial.println("🌐 AP mód: http://" + WiFi.softAPIP().toString());
-
+  apMode = true;
   ledSetColor(false, false, true); // Kék = AP mód
-
-  // DNS szerver: minden lekérdezést az AP IP-jére irányít
-  //dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
 }
 
-void startMDNS() {
+void WIFiConfig::startMDNS() {
   if (MDNS.begin(dnsName)) Serial.println("🌍 mDNS: http://"+String(dnsName)+".local");
   else Serial.println("❌ mDNS hiba");
+}
+
+void WIFiConfig::setupWebServer() { //TODO && (||)---------------------------------------------------------
+  server.on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    if (!this->apMode && this->settings.connectedOnce && !this->resetwifi) {
+      Serial.println("🌐 Wi-Fi beállítva, kiszolgáló indítása...");
+      request->send(LittleFS, "/index.html", "text/html");
+    } else {
+      request->send(LittleFS, "/wifi.html", "text/html");
+    }
+  });
+
+  server.on("/savewifi", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    if (this->apMode && (!this->settings.connectedOnce || this->resetwifi)) {
+      if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
+        String ssid = request->getParam("ssid", true)->value();
+        String password = request->getParam("password", true)->value();
+        
+        this->resetwifi = false;
+        settings = {ssid, password, false}; // Reset the connectedOnce flag
+        saveWiFiSettings(false); // Save the new settings without marking as connectedOnce
+        request->send(200, "text/plain; charset=utf-8", "✅ Mentve, próbál csatlakozni...");
+
+        ledSetColor(false, false, true);
+        delay(500);
+        ESP.restart();
+      } else {
+        request->send(400, "text/plain; charset=utf-8", "Hiányzó mező.");
+      }
+    } else {
+      request->send(500, "text/plain; charset=utf-8", "Az oldal nem található (legalább is ha már be van állítva a WiFi).");
+    }
+  });
+
+  server.begin();
 }

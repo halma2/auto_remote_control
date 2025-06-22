@@ -1,10 +1,9 @@
-#include <LittleFS.h>
-#include <ESPAsyncWebServer.h>
-#include "led.h"
-#include "webserver.h"
 #include "mywifi.h"
+#include <Arduino.h>
+#include "led.h"
+#include <LittleFS.h>
+#include <Wifi.h>
 
-//pio run --target uploadfs
 /* 
 RGB led működése:
 Kék
@@ -16,68 +15,47 @@ Zöld
  Piros, sárga, mit tudom én...
  egyéb hiba - még ki kell találni.
 */
-WiFiSettings settings;
+
+// Konfigurációs változók
+const String dnsName = "vilagitas";
+const String configSsid = "vilagitas-setup";
+const unsigned long reconnectInterval = 10000; // 10 másodperc újracsatlakozási kísérlet
+
+WIFiConfig wifiConfig = WIFiConfig(configSsid, dnsName, reconnectInterval);
 const int buttonPin = 34; // vagy más szabad GPIO
-
-bool wifiSettingsExists = false; // jelzi, hogy van-e Wi-Fi beállítás
-AsyncWebServer server(80);
-
 
 void setup() {
   Serial.begin(115200);
   ledInit();
-  pinMode(buttonPin, INPUT);  // belső felhúzó
+  pinMode(buttonPin, INPUT);
 
   if (!LittleFS.begin()) {
     Serial.println("❌ LittleFS indítása sikertelen");
     return;
   }
   Serial.println("✅ LittleFS indítva");
-  wifiSettingsExists = LittleFS.exists("/wifi.json");
-  settings = loadWiFiSettings();
-
-  if (!connectToWiFi(settings) && !settings.connectedOnce) {
-    Serial.println("❌ Nem sikerült csatlakozni a Wi-Fi-hez, indítás AP módban...");
-    startAccessPoint();
-  } 
-  else {
-    startMDNS();
-  }
-
-  setupWebServer();  // lásd lentebb
+  wifiConfig.startWiFiOrAP();
+  wifiConfig.setupWebServer();
 }
 
-void loop() {
-  static unsigned long buttonPressStart = 0;
-  static bool buttonHeld = false;
-
-  if (wifiSettingsExists && settings.connectedOnce) {
-    reconnectIfNeeded(settings); // háttér Wi-Fi újracsatlakozás, ha kell
-  } /*else {
-    dnsServer.processNextRequest();
-  }*/
-
+unsigned long buttonPressStart = 0;
+bool buttonHeld = false;
+void watchButtonPress() {
   int buttonState = digitalRead(buttonPin);
-
   if (buttonState == HIGH && !buttonHeld) {
     buttonPressStart = millis();
     buttonHeld = true;
   }
-
   if (buttonState == HIGH && buttonHeld) {
-    if (millis() - buttonPressStart > 3000 && !apModeTriggered) { // 3 másodperc
-      Serial.println("🆘 Gomb hosszú lenyomás – AP mód aktiválása!");
-      
-      WiFi.disconnect(true);
-      delay(500);
-      apModeTriggered = true;
-      startAccessPoint();
-    }
+    wifiConfig.resetButtonHandle(millis() - buttonPressStart);
   }
+  if (buttonState == LOW && buttonHeld) buttonHeld = false;
+}
 
-  if (buttonState == LOW && buttonHeld) {
-    buttonHeld = false;
-  }
+void loop() {
+  wifiConfig.reconnectIfNeeded();
+  
+  watchButtonPress();
 
   // Egyéb működés...
   delay(50); // kis késleltetés a loop végén
