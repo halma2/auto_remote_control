@@ -3,22 +3,21 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
-struct WifiSettings {
-  String ssid;
-  String password;
-  bool connectedOnce;
-};
-
 class WIFiConfig {
-  WifiSettings settings;
-  WifiSettings loadWiFiSettings();
-
+  struct WifiSettings {
+    String ssid;
+    String password;
+    bool connectedOnce;
+  } settings;
+  
   bool apMode = false;
   bool resetwifi = false;
+  bool lost_connection = false;
   const String configSsid;
   const String dnsName;
   const unsigned long reconnectInterval;
 
+  void loadWiFiSettings();
   void saveWiFiSettings(bool connectedOnce);
   bool connectToWiFi();
   void startAccessPoint();
